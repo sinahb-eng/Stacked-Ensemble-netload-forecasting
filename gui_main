@@ -1,0 +1,482 @@
+function ml_model_selection_gui
+    %  first GUI window for model selection
+    fig1 = uifigure('Name', 'Machine Learning Model Selection', 'Position', [100, 100, 400, 400]);
+
+    % model names
+    models = {'LSTM', 'SVM', 'RNN', 'Linear Regression', 'ELM', 'GBM', ...
+              'Decision Tree', 'Meta RF', 'CNN', 'Random Forest', 'Stacked Ensemble'};
+
+    % checkboxes for each model
+    checkboxHandles = cell(length(models), 1);
+    for i = 1:length(models)
+        checkboxHandles{i} = uicheckbox(fig1, 'Text', models{i}, 'Position', [50, 360-30*i, 150, 20]);
+    end
+
+    %  Next button for model selection
+    btn1 = uibutton(fig1, 'Text', 'Next', 'Position', [150, 30, 100, 30], ...
+                    'ButtonPushedFcn', @(btn,event) selectMetrics(checkboxHandles, models));
+
+    function selectMetrics(checkboxHandles, models)
+        % Create the second GUI window for metrics selection
+        fig2 = uifigure('Name', 'Select Metrics', 'Position', [100, 100, 400, 600]);  % Increased height
+
+        % Define metric names
+        metrics = {'MAE', 'MSE', 'RMSE', 'MAPE', 'sMAPE', 'NRMSE', 'MSLE', ...
+                   'R_squared', 'explained_variance', 'hitting_rate', 'MB', ...
+                   'MAGE', 'CRMSD', 'UI', 'IOA', 'VAF', 'NMB'};  % All metrics listed
+
+        % Create checkboxes for each metric with reduced spacing
+        metricCheckboxHandles = cell(length(metrics), 1);
+        for i = 1:length(metrics)
+            metricCheckboxHandles{i} = uicheckbox(fig2, 'Text', metrics{i}, 'Position', [50, 580-30*i, 300, 20]);
+        end
+
+        % Create the Next button for metrics selection
+        btn2 = uibutton(fig2, 'Text', 'Next', 'Position', [150, 30, 100, 30], ...
+                        'ButtonPushedFcn', @(btn,event) selectVisualMetrics(fig2, checkboxHandles, metricCheckboxHandles, models, metrics));
+    end
+
+    function selectVisualMetrics(fig2, checkboxHandles, metricCheckboxHandles, models, metrics)
+        % Store the values from the metric checkboxes before closing the window
+        metricValues = cellfun(@(chk) chk.Value, metricCheckboxHandles, 'UniformOutput', true);
+        
+        % Close the second window
+        close(fig2);
+
+        % Create the third GUI window for visual metrics selection
+        fig3 = uifigure('Name', 'Select Visual Metrics', 'Position', [100, 100, 400, 400]);
+
+        % Define visual metric names
+        visualMetrics = {'Taylor Diagram', 'RROC Curve', 'Correlation Plot', ...
+                         'CDF Plot', 'Actual vs. Predicted Plot', 'Error Distribution Plot'};
+
+        % Create checkboxes for each visual metric
+        visualMetricCheckboxHandles = cell(length(visualMetrics), 1);
+        for i = 1:length(visualMetrics)
+            visualMetricCheckboxHandles{i} = uicheckbox(fig3, 'Text', visualMetrics{i}, 'Position', [50, 360-30*i, 250, 20]);
+        end
+
+        % Create the Run button to execute selected models and metrics
+        btn3 = uibutton(fig3, 'Text', 'Run', 'Position', [150, 30, 100, 30], ...
+                        'ButtonPushedFcn', @(btn,event) runSelectedModels(fig3, checkboxHandles, metricValues, visualMetricCheckboxHandles, models, metrics, visualMetrics));
+    end
+
+    function runSelectedModels(fig3, checkboxHandles, metricValues, visualMetricCheckboxHandles, models, metrics, visualMetrics)
+        % Store the values from the visual metric checkboxes before closing the window
+        visualMetricValues = cellfun(@(chk) chk.Value, visualMetricCheckboxHandles, 'UniformOutput', true);
+        
+        % Close the third window
+        close(fig3);
+
+        % Load data
+         data = xlsread('Austria data.xlsx');
+       
+        % Data Division
+        numObservations = numel(data);
+        idxTrain = 1:round(0.7 * numObservations);
+        idxTest = round(0.8 * numObservations) + 1:numObservations;
+        idxVal = round(0.7 * numObservations) + 1:round(0.8 * numObservations);
+        dataTrain = L2018_2019(idxTrain);
+        dataTest = L2018_2019(idxTest);
+        dataVal = L2018_2019(idxVal);
+        
+        % Standardize the data
+        mu = mean(dataTrain);
+        sig = std(dataTrain);
+        dataTrainStandardized = (dataTrain - mu) / sig;
+        dataValStandardized = (dataVal - mu) / sig;
+        dataTestStandardized = (dataTest - mu) / sig;
+        XTrain = dataTrainStandardized(1:end-1);
+        YTrain = dataTrainStandardized(2:end);
+        XVal = dataValStandardized(1:end-1);
+        YVal = dataValStandardized(2:end);
+        XTest = dataTestStandardized(1:end-1);
+        YTest = dataTestStandardized(2:end);
+
+        predictions = {};  % Store predictions for each model
+        model_names = {};  % Store the names of each model
+
+        % Iterate over selected models and run them
+        for i = 1:length(models)
+            if checkboxHandles{i}.Value
+                model_name = models{i};
+                sanitized_model_name = strrep(model_name, ' ', '_');  % Replace spaces with underscores
+                model_names{end+1} = sanitized_model_name;
+                switch model_name
+                    case 'Decision Tree'
+                        mdl_tree = fitrtree(XTrain, YTrain);
+                        YPred = predict(mdl_tree, XTest);
+                        
+                    case 'KNN'
+                        k = 5;
+                        mdl_knn = fitcknn(XTrain, YTrain, 'NumNeighbors', k, 'Standardize', 1);
+                        YPred = predict(mdl_knn, XTest);
+                        
+                    case 'Random Forest'
+                        mdl_rf = TreeBagger(500, XTrain, YTrain, 'Method', 'regression', 'OOBPrediction', 'on', 'NumPredictorsToSample', 'all');
+                        YPred = predict(mdl_rf, XTest);
+                        
+                    case 'GBM'
+                        mdl_gbm = fitrensemble(XTrain, YTrain, 'Method', 'LSBoost', 'NumLearningCycles', 100, 'LearnRate', 0.1);
+                        YPred = predict(mdl_gbm, XTest);
+                        
+                    case 'RNN'
+                             XTrain_RNN = reshape(XTrain, 1, numel(XTrain), 1);
+                             YTrain_RNN = reshape(YTrain, 1, numel(YTrain), 1);
+                             XVal_RNN = reshape(XVal, 1, numel(XVal), 1);
+                             YVal_RNN = reshape(YVal, 1, numel(YVal), 1);
+                             XTest_RNN = reshape(XTest, 1, numel(XTest), 1);
+
+                             layers = [ ...
+                             sequenceInputLayer(3)
+                             fullyConnectedLayer(128)
+                             reluLayer
+                             fullyConnectedLayer(1)
+                             regressionLayer
+                               ];
+
+                            options = trainingOptions('adam', ...
+                            'MaxEpochs', 100, ...
+                            'MiniBatchSize', 64, ...
+                            'InitialLearnRate', 0.001, ...
+                            'GradientThreshold', 1, ...
+                            'Shuffle', 'every-epoch', ...
+                            'ValidationData', {XVal_RNN, YVal_RNN}, ...
+                            'ValidationFrequency', 10, ...
+                            'Verbose', false, ...
+                            'Plots', 'training-progress');
+
+                             net_rnn = trainNetwork(XTrain_RNN, YTrain_RNN, layers, options);
+                             YPred = predict(net_rnn, XTest_RNN);
+
+                        
+                    case 'ELM'
+                        n_hidden_neurons = 100;
+                        input_weights = rand(n_hidden_neurons, 1) * 2 - 1;  
+                        biases = rand(n_hidden_neurons, 1);  
+                        H = 1 ./ (1 + exp(-(input_weights * XTrain' + biases)));  
+                        output_weights = pinv(H') * YTrain;
+                        H_test = 1 ./ (1 + exp(-(input_weights * XTest' + biases)));  
+                        YPred = (H_test' * output_weights)';  
+                        
+                    case 'CNN'
+                        XTrain_CNN = reshape(XTrain, [1, 1, 1, numel(XTrain)]);
+                        YTrain_CNN = reshape(YTrain, [1, 1, 1, numel(YTrain)]);
+                        XVal_CNN = reshape(XVal, [1, 1, 1, numel(XVal)]);
+                        YVal_CNN = reshape(YVal, [1, 1, 1, numel(YVal)]);
+                        XTest_CNN = reshape(XTest, [1, 1, 1, numel(XTest)]);
+                        layers = [
+                            imageInputLayer([1, 1, 1], 'Normalization', 'none')
+                            convolution2dLayer([3, 1], 16, 'Padding', 'same')
+                            batchNormalizationLayer
+                            reluLayer
+                            convolution2dLayer([3, 1], 32, 'Padding', 'same')
+                            batchNormalizationLayer
+                            reluLayer
+                            fullyConnectedLayer(50)
+                            reluLayer
+                            fullyConnectedLayer(1)
+                            regressionLayer
+                        ];
+                        options = trainingOptions('adam', ...
+                            'MaxEpochs', 10, ...
+                            'MiniBatchSize', 64, ...
+                            'InitialLearnRate', 0.001, ...
+                            'ValidationData', {XVal_CNN, YVal_CNN}, ...
+                            'ValidationFrequency', 10, ...
+                            'Verbose', false, ...
+                            'Plots', 'training-progress');
+                        net_cnn = trainNetwork(XTrain_CNN, YTrain_CNN, layers, options);
+                        YPred = predict(net_cnn, XTest_CNN);
+                        
+                    case 'Linear Regression'
+                        tblTrain = table(XTrain, YTrain);
+                        mdl_lr = fitlm(XTrain, YTrain);
+                        YPred = predict(mdl_lr, XTest);
+                        
+                    case 'SVM'
+                        mdl_svm = fitrsvm(XTrain, YTrain, 'KernelFunction', 'gaussian', 'Standardize', true);
+                        YPred = predict(mdl_svm, XTest);
+                        
+                    case 'LSTM'
+                        XTrain_LSTM = reshape(XTrain, 1, numel(XTrain), 1);
+                        YTrain_LSTM = reshape(YTrain, 1, numel(YTrain), 1);
+                        XVal_LSTM = reshape(XVal, 1, numel(XVal), 1);
+                        YVal_LSTM = reshape(YVal, 1, numel(YVal), 1);
+                        XTest_LSTM = reshape(XTest, 1, numel(XTest), 1);
+                        layers = [ ...
+                          sequenceInputLayer(3) 
+                          lstmLayer(128, 'OutputMode', 'sequence')
+                          fullyConnectedLayer(32)
+                          reluLayer
+                          dropoutLayer(0.1)
+                          fullyConnectedLayer(1)
+                          regressionLayer
+                          ];
+
+                        options = trainingOptions('adam', ...
+                            'MaxEpochs', 150, ...
+                            'MiniBatchSize', 128, ...
+                            'InitialLearnRate', 0.005, ...
+                            'GradientThreshold', 1, ...
+                            'Shuffle', 'every-epoch', ...
+                            'ValidationData', {XVal_LSTM, YVal_LSTM}, ...
+                            'ValidationFrequency', 10, ...
+                            'Verbose', false, ...
+                            'Plots', 'training-progress');
+                            net_lstm = trainNetwork(XTrain_LSTM, YTrain_LSTM, layers, options);
+                            YPred = predict(net_lstm, XTest_LSTM);
+                    
+                                       case 'Stacked Ensemble'
+                        % Reshape data for sequence input (LSTM)
+                        XTrain_LSTM = reshape(XTrain, 1, numel(XTrain), 1);
+                        YTrain_LSTM = reshape(YTrain, 1, numel(YTrain), 1);
+                        XVal_LSTM = reshape(XVal, 1, numel(XVal), 1);
+                        YVal_LSTM = reshape(YVal, 1, numel(YVal), 1);
+                        XTest_LSTM = reshape(XTest, 1, numel(XTest), 1);
+
+                        % LSTM Model
+                        layers = [ ...
+                            sequenceInputLayer(3)
+                            bilstmLayer(256, 'OutputMode', 'sequence')
+                            fullyConnectedLayer(64)
+                            dropoutLayer(0.15)
+                            reluLayer
+                            fullyConnectedLayer(1)
+                            regressionLayer
+                        ];
+
+                        options = trainingOptions('adam', ...
+                            'MaxEpochs', 200, ...
+                            'MiniBatchSize', 128, ...
+                            'InitialLearnRate', 0.01, ...
+                            'GradientThreshold', 1, ...
+                            'Shuffle', 'every-epoch', ...
+                            'ValidationData', {XVal_LSTM, YVal_LSTM}, ...
+                            'ValidationFrequency', 10, ...
+                            'Verbose', false, ...
+                            'Plots', 'training-progress');
+
+                        % Train LSTM Model
+                        net_lstm = trainNetwork(XTrain_LSTM, YTrain_LSTM, layers, options);
+                        YPred_LSTM1 = predict(net_lstm, XTest_LSTM);
+                        
+                        YPred_LSTM1 = sig * YPred_LSTM1 + mu;
+
+                        % (reshape)
+                        YPred_LSTM1 = reshape(YPred_LSTM1, [numel(YPred_LSTM1), 1]);
+
+                        % Reshape data for SVM and Autoencoder
+                        XTrain_svm = XTrain(:);
+                        XVal_svm = XVal(:);
+                        XTest_svm = XTest(:);
+
+                        % Autoencoder
+                        hiddenSize = 200;
+                        autoenc = trainAutoencoder(XTrain_svm', hiddenSize, ...
+                            'MaxEpochs', 200, ...
+                            'L2WeightRegularization', 0.001, ...
+                            'SparsityRegularization', 4, ...
+                            'SparsityProportion', 0.06, ...
+                            'ScaleData', false);
+
+                        % Reconstruct data with Autoencoder
+                        XTrain_autoenc = encode(autoenc, XTrain_svm');
+                        XTest_autoenc = encode(autoenc, XTest_svm');
+                        XVal_autoenc = encode(autoenc, XVal_svm');
+
+                        % SVM Model
+                          model_svm = fitrsvm(XTrain_autoenc', YTrain, 'KernelFunction', 'polynomial','PolynomialOrder',...
+                              2, 'BoxConstraint', 0.005, 'Epsilon', 0.1);
+                        YPred_SVM1 = predict(model_svm, XTest_autoenc');
+                        YPred_SVM1 = sig * YPred_SVM1 + mu;
+
+                        YTest_flat = sig * YTest + mu;
+
+                        
+                        % Combine predictions from LSTM and SVM
+                        X_meta = [YPred_LSTM1, YPred_SVM1];
+
+                        % Train Random Forest as meta model
+                        meta_model_rf = TreeBagger(300, X_meta, YTest_flat, 'Method', 'regression',...
+                            'MinLeafSize', 1, 'OOBPredictorImportance', 'on');
+
+                        % Predict with Random Forest
+                        YPred = predict(meta_model_rf, X_meta);
+
+                end
+
+                % De-standardize predictions
+                YPred = sig * YPred + mu;
+                YTest_flat = sig * YTest + mu;
+                predictions{end+1} = YPred;  % Store the predictions
+            end
+        end
+
+        % Calculate and display selected metrics for each model
+        metricsResult = struct();
+        for i = 1:numel(predictions)
+            model_name = model_names{i};
+            YPred = predictions{i};
+
+            fprintf('Metrics for %s:\n', model_name);
+
+            % Calculate selected numeric metrics
+            for j = 1:length(metrics)
+                if metricValues(j)
+                    metric_name = metrics{j};
+                    switch metric_name
+                        case 'MAE'
+                            metricsResult.(model_name).MAE = mean(abs(YPred - YTest_flat));
+                            fprintf('  MAE: %f\n', metricsResult.(model_name).MAE);
+                        case 'MSE'
+                            metricsResult.(model_name).MSE = mean((YPred - YTest_flat).^2);
+                            fprintf('  MSE: %f\n', metricsResult.(model_name).MSE);
+                        case 'RMSE'
+                            metricsResult.(model_name).RMSE = sqrt(mean((YPred - YTest_flat).^2));
+                            fprintf('  RMSE: %f\n', metricsResult.(model_name).RMSE);
+                        case 'MAPE'
+                            metricsResult.(model_name).MAPE = mean(abs((YPred - YTest_flat) ./ YTest_flat)) * 100;
+                            fprintf('  MAPE: %f\n', metricsResult.(model_name).MAPE);
+                        case 'sMAPE'
+                            metricsResult.(model_name).sMAPE = mean(2 * abs(YPred - YTest_flat) ./ (abs(YPred) + abs(YTest_flat))) * 100;
+                            fprintf('  sMAPE: %f\n', metricsResult.(model_name).sMAPE);
+                        case 'NRMSE'
+                            metricsResult.(model_name).NRMSE = (metricsResult.(model_name).RMSE / (max(YTest_flat) - min(YTest_flat))) * 100;
+                            fprintf('  NRMSE: %f\n', metricsResult.(model_name).NRMSE);
+                        case 'MSLE'
+                            metricsResult.(model_name).MSLE = mean((log1p(YPred) - log1p(YTest_flat)).^2);
+                            fprintf('  MSLE: %f\n', metricsResult.(model_name).MSLE);
+                        case 'R_squared'
+                            SS_res = sum((YPred - YTest_flat).^2);
+                            SS_tot = sum((YTest_flat - mean(YTest_flat)).^2);
+                            metricsResult.(model_name).R_squared = 1 - (SS_res / SS_tot);
+                            fprintf('  R_squared: %f\n', metricsResult.(model_name).R_squared);
+                        case 'explained_variance'
+                            metricsResult.(model_name).explained_variance = 1 - (var(YPred - YTest_flat) / var(YTest_flat));
+                            fprintf('  Explained Variance: %f\n', metricsResult.(model_name).explained_variance);
+                        case 'hitting_rate'
+                            tolerance = 0.1 * mean(abs(YTest_flat));
+                            metricsResult.(model_name).hitting_rate = sum(abs(YPred - YTest_flat) <= tolerance) / numel(YTest_flat) * 100;
+                            fprintf('  Hitting Rate: %f\n', metricsResult.(model_name).hitting_rate);
+                        case 'MB'
+                            metricsResult.(model_name).MB = mean(YPred - YTest_flat);
+                            fprintf('  Mean Bias (MB): %f\n', metricsResult.(model_name).MB);
+                        case 'MAGE'
+                            metricsResult.(model_name).MAGE = mean(abs(YPred - YTest_flat));
+                            fprintf('  Mean Absolute Gross Error (MAGE): %f\n', metricsResult.(model_name).MAGE);
+                        case 'CRMSD'
+                            metricsResult.(model_name).CRMSD = sqrt(mean((YPred - mean(YPred) - (YTest_flat - mean(YTest_flat))).^2));
+                            fprintf('  Centered Root Mean Square Difference (CRMSD): %f\n', metricsResult.(model_name).CRMSD);
+                        case 'UI'
+                            metricsResult.(model_name).UI = sqrt(mean((YPred - YTest_flat).^2)) / (sqrt(mean(YPred.^2)) + sqrt(mean(YTest_flat.^2)));
+                            fprintf('  Theil’s Inequality Coefficient (UI): %f\n', metricsResult.(model_name).UI);
+                        case 'IOA'
+                            numerator = sum((YPred - YTest_flat).^2);
+                            denominator = sum((abs(YPred - mean(YTest_flat)) + abs(YTest_flat - mean(YTest_flat))).^2);
+                            metricsResult.(model_name).IOA = 1 - (numerator / denominator);
+                            fprintf('  Index of Agreement (IOA): %f\n', metricsResult.(model_name).IOA);
+                        case 'VAF'
+                            metricsResult.(model_name).VAF = (1 - var(YTest_flat - YPred) / var(YTest_flat)) * 100;
+                            fprintf('  Variance Accounted For (VAF): %f\n', metricsResult.(model_name).VAF);
+                        case 'NMB'
+                            metricsResult.(model_name).NMB = sum(YPred - YTest_flat) / sum(YTest_flat);
+                            fprintf('  Normalized Mean Bias (NMB): %f\n', metricsResult.(model_name).NMB);
+                        % Add more cases for each metric as needed
+                    end
+                end
+            end
+
+            % Generate selected visual metrics
+            for k = 1:length(visualMetrics)
+                if visualMetricValues(k)
+                    visual_metric_name = visualMetrics{k};
+                    switch visual_metric_name
+                        case 'Taylor Diagram'
+                            % Generate Taylor Diagram
+                            sigma_obs = std(YTest_flat);
+                            sigma_pred = std(YPred);
+                            R = corr(YPred, YTest_flat);
+                            STDs = [sigma_obs, sigma_pred];
+                            CORs = [1, R];  
+                            RMSs = sqrt(STDs.^2 + STDs(1)^2 - 2 * STDs .* STDs(1) .* CORs);
+                            figure;
+                            taylordiag(STDs, RMSs, CORs, 'tickRMS', [0:200:max(STDs)], 'tickSTD', [0:200:max(STDs)], 'limSTD', max(STDs) * 1.1);
+                            title(['Taylor Diagram for ', model_name]);
+                            xlabel('Standard Deviation');
+                            ylabel('CRMSD');
+                            legend({model_name, 'Reference'}, 'Location', 'bestoutside');
+                            grid on;
+                            
+                        case 'RROC Curve'
+                            % Generate RROC Curve
+                            e = YPred - YTest_flat;
+                            n = numel(YTest_flat);
+                            e_sorted = sort(e, 'descend');
+                            RROCX = zeros(1, n);
+                            RROCY = zeros(1, n);
+                            for l = 1:n    
+                                s = e_sorted(l);
+                                t = e_sorted - s;
+                                RROCX(l) = sum(t(t > 0));
+                                RROCY(l) = sum(t(t < 0));
+                            end
+                            RROCX = [0, RROCX, inf];
+                            RROCY = [-inf, RROCY, 0];
+                            figure;
+                            plot(RROCX, RROCY);
+                            ylabel('UNDER');
+                            xlabel('OVER');
+                            title(['RROC Curve - ' model_name]);
+                            grid on;
+                            
+                        case 'Correlation Plot'
+                            % Generate Correlation Plot
+                            figure;
+                            plot(YTest_flat, YPred, 'o');
+                            xlabel('Actual');
+                            ylabel('Predicted');
+                            title(['Correlation Plot - ' model_name]);
+                            grid on;
+                            
+                        case 'CDF Plot'
+                            % Generate CDF Plot
+                            figure;
+                            cdfplot(YTest_flat);
+                            hold on;
+                            cdfplot(YPred);
+                            legend('Actual', 'Predicted');
+                            xlabel('Value');
+                            ylabel('CDF');
+                            title(['CDF Plot - ' model_name]);
+                            grid on;
+
+                        case 'Actual vs. Predicted Plot'
+                            % Generate Actual vs. Predicted Plot
+                            figure;
+                            plot(YTest_flat, 'b');
+                            hold on;
+                            plot(YPred, 'r');
+                            legend('Actual', 'Predicted');
+                            xlabel('Time');
+                            ylabel('Value');
+                            title(['Actual vs. Predicted Plot - ' model_name']);
+                            grid on;
+
+                        case 'Error Distribution Plot'
+                            % Generate Error Distribution Plot
+                            errors = YPred - YTest_flat;
+                            figure;
+                            histogram(errors, 30);
+                            xlabel('Error');
+                            ylabel('Frequency');
+                            title(['Error Distribution Plot - ' model_name']);
+                            grid on;
+
+                        % Add more cases for each visual metric as needed
+                    end
+                end
+            end
+        end
+    end
+end
